@@ -1,6 +1,6 @@
 import paho.mqtt.client as mqtt
 import sqlite3 as db
-
+ 
 database = db.connect("datiSensori.db")
 cursor = database.cursor()
 cursor.execute("PRAGMA foreign_keys = ON;")
@@ -13,39 +13,45 @@ cursor.execute('''
 #CREARE LA TABELLA CHE RAPPRESENTA I DATI INVIATI DA ARDUINO 
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS datiAcquario(
+        idMisurazione INTEGER PRIMARY KEY AUTOINCREMENT,
         nomeAcquario TEXT NOT NULL,
-        data DATETIME NOT NULL,
+        data DATETIME,
         tipoMisurazione VARCHAR(30) NOT NULL,
         misurazione DECIMAL(10,2),
-        PRIMARY KEY(nomeAcquario, data, tipoMisurazione),
         FOREIGN KEY (nomeAcquario) REFERENCES acquario(nome) ON DELETE CASCADE
     )
 ''')   
-
 def on_connect(client,userdata,flags, reason_code,properties):
     print(f"Connesso al broker con risultato {reason_code}")
     client.subscribe("acquari/#")
     
+def addValToDb(nome,tipoMisurazione,misurazione):
+    cursor.execute('''
+                    INSERT INTO datiAcquario(nomeAcquario,
+                                             tipoMisurazione,
+                                             misurazione
+                                            )VALUES(?,?,?);
+                    ''',(nome,tipoMisurazione,misurazione))
+    database.commit()
+    print(f"Salvato sul db : {nome}, {tipoMisurazione}, {misurazione}")
 
 def on_message(client,userdata,msg):
     cursor.execute("""
         SELECT EXISTS (
             SELECT 1
-            FROM utenti
-            WHERE email = ?
+            FROM acquario
+            WHERE nome = ?
         )
     """, (msg.topic.split("/")[-3],))
     acquario = cursor.fetchone()[0]
     if(acquario): 
-        match msg.topic.split("/")[-1]:
-            case "tmp":
-                cursor.execute('''INSERT INTO datiAcquario()''')
+        addValToDb(msg.topic.split("/")[-3],msg.topic.split("/")[-1],float(msg.payload.decode()))
 
         
     else:
         cursor.execute('''
-            INSERT INTO acquario(nome,litri)VALUES(?,?)
-        ''',(acquario,0.0))
+            INSERT INTO acquario(nome,litri)VALUES(?,?);
+        ''',(msg.topic.split("/")[-3],0.0))
         database.commit()
         
 
