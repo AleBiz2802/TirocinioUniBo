@@ -1,20 +1,20 @@
 #include<WiFi.h>
 #include <PubSubClient.h>
 #include "TOPIC.h"
-const char* ssid = "Veradsl-Bizzarri";
-const char* password = "15172830";
-const char* mqttbkr = "192.168.0.34";
+const char* ssid = "Alessio";
+const char* password = "ale2802_";
+const char* mqttbkr = "172.20.10.2";
 WiFiClient clientWiFi;
 PubSubClient client(clientWiFi);
-char* nome = "Acquario1";
+char* nome = "Acquario4";
 
 
 
 /* Spazio per sensori e valori */
 float ph = 8.0;
-float livelloAcqua = 50.0;
-float temperatura  = 28.0;
-
+float livelloAcqua =  49.0;
+float temperatura  = 12.0;
+int check = 0;
 
 
 
@@ -33,7 +33,7 @@ void setup() {
     Serial.println("CONNESSIONE AL BROKER MQTT");
     if(client.connect(nome)){
       Serial.println("CONNESSIONE EFFETTUATA");
-       client.subscribe("acquari/acquario1/attuatori/#");
+       client.subscribe(createTopic(nome,8));
     }else{
       Serial.print("Fallito, rc = ");
       Serial.print(client.state());
@@ -49,11 +49,14 @@ void loop() {
     Serial.println("Riconnessione al broker ");
     client.connect(nome);
   }
+  if(check == 0){
+    client.publish("acquari/nome",nome);
+  }
   client.loop();
  //client.publish("test/mqtt","Messaggio di test da arduino giga");
-  publishFloatVals(client,ph,PH);
-  publishFloatVals(client,livelloAcqua,LIVELLO_ACQUA);
-  publishFloatVals(client,temperatura,TEMPERATURA);
+  publishFloatVals(client,ph,createTopic(nome,0));
+  publishFloatVals(client,livelloAcqua,createTopic(nome,1));
+  publishFloatVals(client,temperatura,createTopic(nome,2));
 
 
   Serial.println("Messaggio inviato"); 
@@ -77,20 +80,40 @@ void callback(char* topic, byte* payload, unsigned int length) {
     Serial.print(" → ");
     Serial.println(msg);
 
-    if (strcmp(topic, POMPAR) == 0) {
+    if (strcmp(topic, createTopic(nome,4)) == 0) {
         // pompa a immersione
        // digitalWrite(PIN_POMPAR, msg == "ON" ? HIGH  
        Serial.println("POMPA RIEMPIMENTO: ");Serial.print(msg+"\n");
 
-    } else if (strcmp(topic, POMPAS) == 0) {
+    } else if (strcmp(topic, createTopic(nome,5)) == 0) {
         // pompa a superficie
        // digitalWrite(PIN_POMPAS, msg == "ON" ? HIGH : LOW);
        Serial.println("POMPA SVUOTAMENTO: "); Serial.print(msg+"\n");
 
-    } else if (strcmp(topic, RISCALDATORE) == 0) {
+    } else if (strcmp(topic, createTopic(nome,6)) == 0) {
         // riscaldatore
        // digitalWrite(PIN_RISC, msg == "ON" ? HIGH : LOW);
        Serial.println("RISCALDATORE: "); Serial.print(msg+"\n");
        
       }
-}   
+}
+
+char* createTopic(char* nome, int pos) {
+    static char topic[100];
+
+    const char* suffix[9] = {
+        "sensori/ph",
+        "sensori/lvl",
+        "sensori/tmp",
+        "sensori/time",
+        "attuatori/pr",
+        "attuatori/ps",
+        "attuatori/risc",
+        "attuatori/luce",
+        "attuatori/#"
+    };
+
+    snprintf(topic, sizeof(topic), "acquari/%s/%s", nome, suffix[pos]);
+
+    return topic;
+}
