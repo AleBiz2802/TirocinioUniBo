@@ -7,7 +7,7 @@ cursor.execute("PRAGMA foreign_keys = ON;")
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS acquario(
         nome VARCHAR(30) NOT NULL PRIMARY KEY,
-        litri DECIMAL(10,2) NOT NULL
+        litri DECIMAL(10,2)
     )
 ''')
 #CREARE LA TABELLA CHE RAPPRESENTA I DATI INVIATI DA ARDUINO 
@@ -23,7 +23,7 @@ cursor.execute('''
 ''')   
 def on_connect(client,userdata,flags, reason_code,properties):
     print(f"Connesso al broker con risultato {reason_code}")
-    client.subscribe("acquari/#")
+    client.subscribe("acquari/nome")
     
 def addValToDb(nome,tipoMisurazione,misurazione):
     cursor.execute('''
@@ -35,24 +35,28 @@ def addValToDb(nome,tipoMisurazione,misurazione):
     database.commit()
     print(f"Salvato sul db : {nome}, {tipoMisurazione}, {misurazione}")
 
+def topicBuilder(client,userdata,msg):
+    if(msg.topic.split("/")[-1] == "nome"):
+        client.subscribe("acquari/"+str(msg.payload.decode('utf-8'))+"/sensori/"+"#")
+        
 def on_message(client,userdata,msg):
-    cursor.execute("""
-        SELECT EXISTS (
-            SELECT 1
-            FROM acquario
-            WHERE nome = ?
-        )
-    """, (msg.topic.split("/")[-3],))
-    acquario = cursor.fetchone()[0]
-    if(acquario): 
+    if msg.topic.split("/")[-1]=="nome":
+        cursor.execute("""
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM acquario
+                        WHERE nome = ?
+                    )
+                """, (msg.payload.decode('utf-8'),))
+        acquario = cursor.fetchone()[0]
+        if(not acquario):
+            cursor.execute('''INSERT INTO acquario(nome)VALUES(?);''',(msg.payload.decode('utf-8'),))
+            database.commit()
+        topicBuilder(client,userdata,msg)
+        print(f"iscritto ai topic di {msg.payload.decode('utf-8')}")
+    else:
         addValToDb(msg.topic.split("/")[-3],msg.topic.split("/")[-1],float(msg.payload.decode()))
 
-        
-    else:
-        cursor.execute('''
-            INSERT INTO acquario(nome,litri)VALUES(?,?);
-        ''',(msg.topic.split("/")[-3],0.0))
-        database.commit()
         
 
 
@@ -64,4 +68,4 @@ mqttClient.on_message = on_message
 mqttClient.connect("172.20.10.2",1883,60)
 
 
-mqttClient.loop_forever()
+mqttClient.loop_forever() 
