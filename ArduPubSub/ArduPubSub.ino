@@ -1,13 +1,27 @@
-#include<WiFi.h>
+#include <WiFi.h>
 #include <PubSubClient.h>
+#include <ArduinoBLE.h>
 #include "TOPIC.h"
-const char* ssid = "Alessio";
-const char* password = "ale2802_";
-const char* mqttbkr = "172.20.10.2";
+#include <string>
+#include <vector>
+/*IMPOSTAZIONI BLUETOOTH*/
+// servizio per ricevere le impostazioni del wifi
+BLEService dataService("19B10010-E8F2-537E-4F6C-D104768A1214"); 
+//caratteristica per abilitare l'invio dei dati
+BLEStringCharacteristic dataWritingCharacteristic("19B10011-E8F2-537E-4F6C-D104768A1214",BLEWrite,100);
+//caratteristica per notificare che i dati sono stati inseriti
+BLEByteCharacteristic dataNotifyingCharacteristic("19B10012-E8F2-537E-4F6C-D104768A1214",BLERead | BLENotify);
+/* IMPOSTAZIONI WIFI*/
+bool wifiConfigurato = false;
+const char* ssid = "";
+const char* password = "";
+
+/*IMPOSTAZIONI MQTT*/
+const char* mqttbkr = "";
+char* nome = "";
+
 WiFiClient clientWiFi;
 PubSubClient client(clientWiFi);
-char* nome = "Acquario4";
-
 
 
 /* Spazio per sensori e valori */
@@ -20,7 +34,9 @@ int check = 0;
 
 /*Spazio per attuatori*/
 void setup() {
-  Serial.begin(115200); 
+  Serial.begin(115200);
+
+ 
   WiFi.begin(ssid,password);
   while(WiFi.status()!=WL_CONNECTED){
     delay(1000);
