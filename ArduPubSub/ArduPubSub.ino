@@ -55,7 +55,7 @@ void setup() {
   
   BLE.advertise();
   Serial.println("Acquario in attesa di connessioni"); 
-
+  dataNotifyingCharacteristic.writeValue(1);
   /*
 
   WiFi.begin(ssid,password);
@@ -82,25 +82,41 @@ void setup() {
 }
 
 void loop() {
-  if(wifiConfigurato==false && dataWritingCharacteristic.written()){
-    String dati = dataWritingCharacteristic.value();
-    ssid     = tokenize(dati, ',', 0);
-    password = tokenize(dati, ',', 1);
-    mqttbkr  = tokenize(dati, ',', 2);
-    nome     = tokenize(dati, ',', 3);
-    dataNotifyingCharacteristic.writeValue(1);
-    wifiConfigurato = true;
-    delay(500);
+  if(wifiConfigurato==false){
+    BLE.poll();
+    if(dataWritingCharacteristic.written()){
+      String dati = dataWritingCharacteristic.value();
+      ssid     = tokenize(dati, ',', 0);
+      Serial.println(ssid);
+      password = tokenize(dati, ',', 1);
+      Serial.println(password);
+      mqttbkr  = tokenize(dati, ',', 2);
+      Serial.println(mqttbkr);
+      nome     = tokenize(dati, ',', 3);
+      Serial.println(nome);
+      dataNotifyingCharacteristic.writeValue(1);
+      wifiConfigurato = true;
+      unsigned long t = millis();
+    while (millis() - t < 500) 
+      BLE.poll();
+
     BLE.disconnect();
     BLE.stopAdvertise();
     BLE.end();
     delay(500);
     WiFi.begin(ssid.c_str(),password.c_str());
+    Serial.println(ssid.c_str());
+    Serial.println(password.c_str());
+    }
+ 
     
   }
   if(WiFi.status()!= WL_CONNECTED && wifiConfigurato == true){
-    Serial.println("Connessione al wifi in corso");
-    delay(1000);
+  
+      Serial.println("Connessione al wifi in corso");
+      Serial.println(WiFi.status());
+      WiFi.begin(ssid.c_str(),password.c_str());
+      delay(1000);
   }
   if(WiFi.status()==WL_CONNECTED ){
     Serial.println("Connesso al wifi");
@@ -119,7 +135,7 @@ void loop() {
         }else{
           Serial.print("Fallito, rc = ");
           Serial.print(client.state());
-          Serial.println("Riprovare"); 
+          Serial.println(" Riprovare"); 
           delay(5000);
         }
       }
