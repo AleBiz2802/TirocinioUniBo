@@ -5,7 +5,7 @@ def on_connect(client,userdata,flags,reason_code,properties):
     client.subscribe("acquari/nome")
 
 def on_message(client,userdata,msg):
-    topicBuilder(client,userdata,msg)
+    topicBuilder(client,userdata,msg,"sensori")
     print(msg.topic+" "+str(msg.payload.decode('utf-8')))
    # if msg.topic.split("/")[-3] == "acquario1" : 
     match msg.topic.split("/")[-1]: 
@@ -33,9 +33,10 @@ def on_message(client,userdata,msg):
                 topicPublisher(msg,"HIGH")
                 print("Accendere pompa di svuotamento")
 
-def topicBuilder(client,userdata,msg):
+def topicBuilder(client,userdata,msg,subtopic):
+    subTopic = f"/{subtopic}/"
     if(msg.topic.split("/")[-1] == "nome"):
-        client.subscribe("acquari/"+str(msg.payload.decode('utf-8'))+"/sensori/"+"#")
+        client.subscribe("acquari/"+str(msg.payload.decode('utf-8'))+subTopic+"#")
 def topicPublisher(msg,val):
     
     match msg.topic.split("/")[-1]:
@@ -45,7 +46,7 @@ def topicPublisher(msg,val):
             mqttClient.publish("acquari/"+str(msg.topic.split("/")[-3])+"/"+"attuatori/"+"pr",val)
         case "ph":
             mqttClient.publish("acquari/"+str(msg.topic.split("/")[-3])+"/"+"attuatori/"+"ps",val)
-    
+  
             
 mqttClient = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 mqttClient.on_connect = on_connect
