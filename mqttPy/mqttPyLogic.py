@@ -1,6 +1,5 @@
 import paho.mqtt.client as mqtt
-
-
+IP = input("Inserisci l'indirizzo ip del broker mqtt:")
 def on_connect(client,userdata,flags,reason_code,properties):
     print(f"Connesso con risultato {reason_code}")
     client.subscribe("acquari/nome")
@@ -52,6 +51,6 @@ mqttClient = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 mqttClient.on_connect = on_connect
 mqttClient.on_message = on_message
 
-mqttClient.connect("172.20.10.2",1883,60)
+mqttClient.connect(IP,1883,60)
 
 mqttClient.loop_forever()
