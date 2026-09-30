@@ -97,12 +97,12 @@ void loop() {
       dataNotifyingCharacteristic.writeValue(1);
       wifiConfigurato = true;
       unsigned long t = millis();
-    while (millis() - t < 500) 
+      while (millis() - t < 500) 
       BLE.poll();
 
-    BLE.disconnect();
-    BLE.stopAdvertise();
-    BLE.end();
+      BLE.disconnect();
+      BLE.stopAdvertise();
+      BLE.end();
     delay(500);
     WiFi.begin(ssid.c_str(),password.c_str());
     Serial.println(ssid.c_str());
