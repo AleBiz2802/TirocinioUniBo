@@ -6,7 +6,7 @@
 #include <vector>
 /*IMPOSTAZIONI BLUETOOTH*/
 // servizio per ricevere le impostazioni del wifi
-BLEService dataService("19B10010-E8F2-537E-4F6C-D104768A1214"); 
+BLEService dataService("19B10010-E8F2-537E-4F6C-D104768A1214");
 //caratteristica per abilitare l'invio dei dati
 BLEStringCharacteristic dataWritingCharacteristic("19B10011-E8F2-537E-4F6C-D104768A1214",BLEWrite,100);
 //caratteristica per notificare che i dati sono stati inseriti
@@ -26,14 +26,28 @@ String nome = "";
 WiFiClient clientWiFi;
 PubSubClient client(clientWiFi);
 
+/*PARAMETRI DA CONFIGURARE VIA APP ( TRAMITE ISCRIZIONE A TOPIC MQTT configurazione/#)*/
+float phMax;
+float phMin;
 
-/* Spazio per sensori e valori */
-float ph = 8.0;
-float livelloAcqua =  49.0;
-float temperatura  = 12.0;
+float livelloAcquaMin;
+float livelloAcquaMax;
+
+float livelloPhMax;
+float livelloPhMin;
+
+
+unsigned long campionamentoPh;
+unsigned long campionamentoTmp; 
+unsigned long campionamentoLivelloAcqua;
+
+int campionamentiImpostati = 0;
 int check = 0;
 
-
+/*valori di prova*/
+float ph = 7.0;
+float livelloAcqua =  50.0;
+float temperatura  = 12.0;
 
 /*Spazio per attuatori*/
 void setup() {
@@ -119,7 +133,6 @@ void loop() {
       delay(1000);
   }
   if(WiFi.status()==WL_CONNECTED ){
-    Serial.println("Connesso al wifi");
     if(mqttConfigurato == false){
        client.setServer(mqttbkr.c_str(),1883);
        client.setCallback(callback);
@@ -131,6 +144,7 @@ void loop() {
         if(client.connect(nome.c_str())){
           Serial.println("CONNESSIONE EFFETTUATA");
           client.subscribe(createTopic(nome,8).c_str());
+          client.subscribe(createTopic(nome,9).c_str());
           mqttAttivato = true;
         }else{
           Serial.print("Fallito, rc = ");
@@ -146,17 +160,21 @@ void loop() {
         }
         if(check == 0){
           client.publish("acquari/nome",nome.c_str());
+          check = 1;
+        }
+        
+        //client.publish("test/mqtt","Messaggio di test da arduino giga");
+        if(campionamentoPh != 0){
+           publishFloatVals(ph,0,campionamentoPh);
+        }
+        if(campionamentoLivelloAcqua!=0){
+          publishFloatVals(livelloAcqua,1,campionamentoLivelloAcqua);
+        }
+        if(campionamentoTmp != 0){
+          publishFloatVals(temperatura,2,campionamentoTmp);
         }
         client.loop();
-        //client.publish("test/mqtt","Messaggio di test da arduino giga");
-        publishFloatVals(client,ph,createTopic(nome,0));
-        publishFloatVals(client,livelloAcqua,createTopic(nome,1));
-        publishFloatVals(client,temperatura,createTopic(nome,2));
-
-
-        Serial.println("Messaggio inviato"); 
-        delay(5000); 
-
+       // delay(5000);
       }
     }
   }
@@ -171,6 +189,16 @@ void publishFloatVals(PubSubClient& t, float val, String topic) {
     t.publish(topic.c_str(), msg);
 }   
 
+void publishFloatVals(float val, int n, unsigned long tempo){
+  unsigned long tempoPrev = 0;
+  if(millis()-tempoPrev>=tempo){
+      tempoPrev = millis();
+      publishFloatVals(client,val,createTopic(nome,n));
+      Serial.println("Messaggio inviato"); 
+  }
+}
+
+
 void callback(char* topic, byte* payload, unsigned int length) {
     String msg;
     for (unsigned int i = 0; i < length; i++) {
@@ -183,6 +211,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
     Serial.print(topicStr);
     Serial.print(" -> ");
     Serial.println(msg);
+  
 
     if (topicStr == createTopic(nome,4)) {
         // pompa a immersione
@@ -198,13 +227,21 @@ void callback(char* topic, byte* payload, unsigned int length) {
         // riscaldatore
        // digitalWrite(PIN_RISC, msg == "ON" ? HIGH : LOW);
        Serial.println("RISCALDATORE: " + msg);
-       
-      }
+    } else if( topicStr ==  createTopic(nome,10)){
+        int val = msg.toInt();
+        campionamentoPh = 1000*val;
+    } else if (topicStr == createTopic(nome,11)){
+        int val = msg.toInt();
+        campionamentoLivelloAcqua = 1000*val;
+    } else if(topicStr == createTopic(nome,12)){
+        int val = msg.toInt();
+        campionamentoTmp = 1000*val;
+    }
 }
 
 String createTopic(String nome, int pos) {
-    const char* suffix[9] = {
-        "sensori/ph",
+    const char* suffix[13] = {
+        "sensori/ph", 
         "sensori/lvl",
         "sensori/tmp",
         "sensori/time",
@@ -212,7 +249,11 @@ String createTopic(String nome, int pos) {
         "attuatori/ps",
         "attuatori/risc",
         "attuatori/luce",
-        "attuatori/#"
+        "attuatori/#",
+        "configurazione/#",
+        "configurazione/temporizzazione/tempoPh",
+        "configurazione/temporizzazione/tempoLivelloAcqua",
+        "configurazione/temporizzazione/tempoTemperatura"
     };
 
     return "acquari/" + nome + "/" + String(suffix[pos]);
