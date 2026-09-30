@@ -1,6 +1,6 @@
 import paho.mqtt.client as mqtt
 import sqlite3 as db
- 
+IP = input("Inserisci l'indirizzo ip del broker mqtt:")
 database = db.connect("datiSensori.db")
 cursor = database.cursor()
 cursor.execute("PRAGMA foreign_keys = ON;")
@@ -65,7 +65,7 @@ mqttClient = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 mqttClient.on_connect = on_connect
 mqttClient.on_message = on_message
 
-mqttClient.connect("172.20.10.2",1883,60)
+mqttClient.connect(IP,1883,60)
 
 
 mqttClient.loop_forever() 
