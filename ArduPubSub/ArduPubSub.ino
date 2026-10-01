@@ -38,9 +38,12 @@ float livelloPhMin;
 
 
 unsigned long campionamentoPh;
-unsigned long campionamentoTmp; 
+unsigned long ultimoCampionamentoPh = 0 ;
+unsigned long campionamentoTmp;
+unsigned long ultimoCampionamentoTmp = 0 ;
 unsigned long campionamentoLivelloAcqua;
-
+unsigned long ultimoCampionamentoLivelloAcqua = 0;
+unsigned long tempo = 0 ;
 int campionamentiImpostati = 0;
 int check = 0;
 
@@ -164,15 +167,11 @@ void loop() {
         }
         
         //client.publish("test/mqtt","Messaggio di test da arduino giga");
-        if(campionamentoPh != 0){
-           publishFloatVals(ph,0,campionamentoPh);
-        }
-        if(campionamentoLivelloAcqua!=0){
-          publishFloatVals(livelloAcqua,1,campionamentoLivelloAcqua);
-        }
-        if(campionamentoTmp != 0){
-          publishFloatVals(temperatura,2,campionamentoTmp);
-        }
+       
+        publishFloatVals(ph,0,ultimoCampionamentoPh,campionamentoPh);
+        publishFloatVals(livelloAcqua,1,ultimoCampionamentoLivelloAcqua,campionamentoLivelloAcqua);
+        publishFloatVals(temperatura,2,ultimoCampionamentoTmp,campionamentoTmp);
+      
         client.loop();
        // delay(5000);
       }
@@ -189,12 +188,14 @@ void publishFloatVals(PubSubClient& t, float val, String topic) {
     t.publish(topic.c_str(), msg);
 }   
 
-void publishFloatVals(float val, int n, unsigned long tempo){
-  unsigned long tempoPrev = 0;
-  if(millis()-tempoPrev>=tempo){
-      tempoPrev = millis();
+void publishFloatVals(float val, int n, unsigned long &ultimoInvio, unsigned long intervallo){
+  //unsigned long tempoPrev = 0;
+  if(intervallo!=0){
+      if(millis()-ultimoInvio>=intervallo){
+      ultimoInvio= millis();
       publishFloatVals(client,val,createTopic(nome,n));
-      Serial.println("Messaggio inviato"); 
+       Serial.println("Messaggio inviato"); 
+    }
   }
 }
 
@@ -230,12 +231,15 @@ void callback(char* topic, byte* payload, unsigned int length) {
     } else if( topicStr ==  createTopic(nome,10)){
         int val = msg.toInt();
         campionamentoPh = 1000*val;
+        Serial.print("Campionamento ph : ");Serial.print(campionamentoPh);Serial.print("\n");
     } else if (topicStr == createTopic(nome,11)){
         int val = msg.toInt();
         campionamentoLivelloAcqua = 1000*val;
+        Serial.print("Campionamento acqua : ");Serial.print(campionamentoLivelloAcqua);Serial.print("\n");
     } else if(topicStr == createTopic(nome,12)){
         int val = msg.toInt();
         campionamentoTmp = 1000*val;
+        Serial.print("Campionamento temperatura: ");Serial.print(campionamentoTmp);Serial.print("\n");
     }
 }
 
