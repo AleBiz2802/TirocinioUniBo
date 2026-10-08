@@ -1,5 +1,7 @@
 import paho.mqtt.client as mqtt
 import sqlite3 as db
+from datetime import datetime
+
 IP = input("Inserisci l'indirizzo ip del broker mqtt:")
 database = db.connect("datiSensori.db")
 cursor = database.cursor()
@@ -55,10 +57,11 @@ def on_connect(client,userdata,flags, reason_code,properties):
 def addValToDb(nome,tipoMisurazione,misurazione):
     cursor.execute('''
                     INSERT INTO datiAcquario(nomeAcquario,
+                                             data,
                                              tipoMisurazione,
                                              misurazione
-                                            )VALUES(?,?,?);
-                    ''',(nome,tipoMisurazione,misurazione))
+                                            )VALUES(?,?,?,?);
+                    ''',(nome,datetime.now().replace(microsecond=0),tipoMisurazione,misurazione))
     database.commit()
     print(f"Salvato sul db : {nome}, {tipoMisurazione}, {misurazione}")
 
@@ -82,39 +85,47 @@ def on_message(client,userdata,msg):
                 cursor.execute('''INSERT INTO acquario(nome)VALUES(?);''',(msg.payload.decode('utf-8'),))
                 database.commit()
             topicBuilder(client,userdata,msg,"/sensori/#")
-            topicBuilder(client,userdata,msg,"/configurazione/valoreLimite/#")
+            topicBuilder(client,userdata,msg,"/configurazione/#")
         if msg.topic.split("/")[-2]=="sensori":
                 addValToDb(msg.topic.split("/")[-3],msg.topic.split("/")[-1],float(msg.payload.decode()))
         if msg.topic.split("/")[-2]=="valoreLimite":
-            inserisciConfigurazione(msg.topic.split("/")[-4],
-                                    msg.topic.split("/")[-1],
-                                    float(msg.payload.decode().split(",")[0]),
-                                    float(msg.payload.decode().split(",")[1]))
-        
-                 
+            inserisciConfigurazione(msg)
+        if msg.topic.split("/")[-2]=="litraggio":
+            inserisciConfigurazione(msg)
 
-def inserisciConfigurazione(nomeAcquario,tipoMisurazione,valoreMin,valoreMax):
-    match tipoMisurazione:
+def inserisciConfigurazione(msg):
+    match msg.topic.split("/")[-1]:
         case "ph":
             cursor.execute('''
                 INSERT INTO configurazionePh(nomeAcquario,phMin,phMax
                 ) VALUES(?,?,?);
-            ''',(nomeAcquario,valoreMin,valoreMax))        
+            ''',(msg.topic.split("/")[-4],float(msg.payload.decode().split(",")[0]),float(msg.payload.decode().split(",")[1])))        
             database.commit()
         case "tmp":
             cursor.execute('''
                 INSERT INTO configurazioneTemperatura(nomeAcquario,tempMin,tempMax
                 ) VALUES(?,?,?);
-            ''',(nomeAcquario,valoreMin,valoreMax))
+            ''',(msg.topic.split("/")[-4],float(msg.payload.decode().split(",")[0]),float(msg.payload.decode().split(",")[1])))
             database.commit()
         case "lvl":
             cursor.execute('''
                 INSERT INTO configurazioneLivello(nomeAcquario,lvlMin,lvlMax)VALUES(?,?,?)
-            ''',(nomeAcquario,valoreMin,valoreMax))
+            ''',(msg.topic.split("/")[-4],float(msg.payload.decode().split(",")[0]),float(msg.payload.decode().split(",")[1])))
+            database.commit()
+
+        case "litri":
+            cursor.execute('''
+                UPDATE acquario
+                SET litri = ?
+                WHERE nome = ?
+            ''',(float(msg.payload.decode()),msg.topic.split("/")[-4]))
+            database.commit()
+
+ 
+ 
 mqttClient = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 mqttClient.on_connect = on_connect
 mqttClient.on_message = on_message
-
 mqttClient.connect(IP,1883,60)
 
 
