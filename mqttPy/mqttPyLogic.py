@@ -1,12 +1,14 @@
 import paho.mqtt.client as mqtt
+import time
+from datetime import datetime
 import sqlite3 as db
 IP = input("Inserisci l'indirizzo ip del broker mqtt:")
 database = db.connect("datiSensori.db")
+utlima_ora = 0 
 cursor = database.cursor()
 def on_connect(client,userdata,flags,reason_code,properties):
     print(f"Connesso con risultato {reason_code}")
     client.subscribe("acquari/nome")
-
 def on_message(client,userdata,msg):
     topicBuilder(client,userdata,msg,"sensori")
     print(msg.topic+" "+str(msg.payload.decode('utf-8')))
@@ -113,6 +115,30 @@ def checkValuesAndTakeAction(msg):
                         print(f"Livello dell'acqua ripristinato {valoreAttuale}. Pompa di riempimento disattivata")
 
 
+def computePhMean(data):
+    cursor.execute("""
+        SELECT datiAcquario.nomeAcquario, AVG(misurazione)
+        FROM datiAcquario,configurazionePh
+        WHERE datiAcquario.nomeAcquario = configurazionePh.nomeAcquario AND tipoMisurazione = 'ph' AND data >= ? 
+        GROUP BY datiAcquario.nomeAcquario
+        HAVING AVG(misurazione)>phMax OR AVG(misurazione)<phMin;
+    """,(data,))
+    risultato = cursor.fetchall()
+    for r in risultato: 
+        print(f"{r[0]}")    
+"""
+Progettare la funzione che gestisce il ciclo di cambio di acqua quando il ph differisce dalla soglia. 
+
+COSA DEVE FARE: 
+Ogni ora il servizio richiede la media dei valori del ph. 
+Controlla che la media dei valori ora dopo ora sia all'interno dell'intervallo stabilito nella configurazionePh
+Se il valore è superiore o inferiore -> Scrive sul topic "Notifiche" 
+L'app, iscritta al topic "Notifiche", successivamente invierà una notifica all'utente "Il Ph dell'acquario x è fuori soglia, necessario  cambio d'acqua"
+
+Durante il cambio dell'acqua, quell'acquario non può eseguire nient'altro tranne che l'interruzione da parte dell'utente
+"""
+
+
 mqttClient = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 mqttClient.on_connect = on_connect
 mqttClient.on_message = on_message
@@ -120,3 +146,5 @@ mqttClient.on_message = on_message
 mqttClient.connect(IP,1883,60)
 
 mqttClient.loop_forever()
+
+
