@@ -12,6 +12,7 @@ def on_connect(client,userdata,flags,reason_code,properties):
     maxPh = input("inserisci il valore massimo consentito del ph:")
     minTemperatura = input("Inserisci il valore minimo consentito della temperatura:")
     maxTemperatura = input("Inserisci il valore massimo consentito della temperatura:")
+    litraggioVasca = input("Inserisci la capacità dell'acquario")
     minLvl = input("Inserisci il valore minimo consentito del livello dell'acqua :")
     maxLvl = input("Inserisci il valore massimo consentito del livello dell'acqua:")
     intervalloPh = f"{minPh},{maxPh}"
@@ -23,11 +24,12 @@ def on_connect(client,userdata,flags,reason_code,properties):
     topicPublisher(NOME_ACQUARIO,"configurazione/valoreLimite","ph",intervalloPh)
     topicPublisher(NOME_ACQUARIO,"configurazione/valoreLimite","tmp",intervalloTemperatura)
     topicPublisher(NOME_ACQUARIO,"configurazione/valoreLimite","lvl",intervalloLivello)
+    topicPublisher(NOME_ACQUARIO,"configurazione/litraggio","litri",litraggioVasca)
 def on_message(client,userdata,msg):
     print(f"Messaggio ricevuto su {msg.topic}: {msg.payload.decode()}")
 
-def topicPublisher(nome,tipoTopic,tipoMisurazione,tempoCampionamento):
-    mqttClient.publish("acquari/"+str(nome)+"/"+str(tipoTopic)+"/"+str(tipoMisurazione),str(tempoCampionamento))
+def topicPublisher(nome,tipoTopic,tipoMisurazione,valore):
+    mqttClient.publish("acquari/"+str(nome)+"/"+str(tipoTopic)+"/"+str(tipoMisurazione),str(valore))
     
 
 mqttClient = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
