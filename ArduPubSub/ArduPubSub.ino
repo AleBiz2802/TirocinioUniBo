@@ -1,9 +1,5 @@
-#include <WiFi.h>
-#include <PubSubClient.h>
-#include <ArduinoBLE.h>
-#include "TOPIC.h"
-#include <string>
-#include <vector>
+#include "LIBRERIE.h"
+#include "DEFINIZIONI.h"
 /*IMPOSTAZIONI BLUETOOTH*/
 // servizio per ricevere le impostazioni del wifi
 BLEService dataService("19B10010-E8F2-537E-4F6C-D104768A1214");
@@ -48,9 +44,15 @@ int campionamentiImpostati = 0;
 int check = 0;
 
 /*valori di prova*/
-float ph = 7.0;
-float livelloAcqua =  50.0;
-float temperatura  = 12.0;
+float ph = 10;
+float livelloAcqua =  30.0;
+float temperatura  = 9.0;
+
+
+
+/*Inizializzazione sensori*/
+OneWire oneWire(TEMPERATURA);
+DallasTemperature(&oneWire);
 
 /*Spazio per attuatori*/
 void setup() {
@@ -96,6 +98,25 @@ void setup() {
     }
   }
 */ 
+
+  Wire.begin();
+  pinMode(LIVELL0_TANICA_1,INPUT);
+  pinMode(LIVELLO_ACQUA_3,INPUT);
+  pinMode(LIVELLO_PH,INPUT);
+  pinMode(13,OUTPUT);
+  pinMode(12,OUTPUT);
+  pinMode(POMPA_OUT,OUTPUT);
+  pinMode(POMPA_IN,OUTPUT);
+  pinMode(ILLUMINAZIONE,OUTPUT);
+  pinMode(VENTOLA,OUTPUT);
+  pinMode(RISCALDATORE;OUTPUT);
+
+  digitalWrite(POMPA_IN,HIGH);
+  digitalWrite(POMPA_OUT,HIGH);
+  digitalWrite(VENTOLA,LOW);
+  digitalWrite(ILLUMINAZIONE,HIGH); 
+  digitalWrite(RISCALDATORE,HIGH);
+  
 }
 
 void loop() {
@@ -281,3 +302,5 @@ String tokenize(String toTokenize, char c, int pos){
 
   return ""; // posizione non trovata
 }
+
+
