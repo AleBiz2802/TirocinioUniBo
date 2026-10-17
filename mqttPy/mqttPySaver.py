@@ -1,8 +1,25 @@
 import paho.mqtt.client as mqtt
 import sqlite3 as db
+import os
+from influxdb_client_3 import (
+  InfluxDBClient3, InfluxDBError, Point, WritePrecision,
+  WriteOptions, write_client_options)
+from dotenv import load_dotenv
 from datetime import datetime
-
+load_dotenv("INFLUX_ENV.env")
+print(load_dotenv("INFLUX_ENV.env"))  
 IP = input("Inserisci l'indirizzo ip del broker mqtt:")
+#definizione del db serietemporale :
+host = os.getenv('HOST')
+token = os.getenv('TOKEN')
+influxdb = os.getenv('DATABASE')
+
+
+influxClient = InfluxDBClient3(host=host,
+                        token=token,
+                        database=influxdb) 
+
+#definizione db sqlite
 database = db.connect("datiSensori.db")
 cursor = database.cursor()
 cursor.execute("PRAGMA foreign_keys = ON;")
@@ -13,10 +30,18 @@ cursor.execute('''
     )
 ''')
 cursor.execute('''
+    CREATE TABLE IF NOT EXISTS statoAcquario(
+        nomeAcquario VARCHAR (30) NOT NULL PRIMARY KEY,
+        statoAcquario VARCHAR (20),
+        FOREIGN KEY (nomeAcquario) REFERENCES acquario(nome) ON DELETE CASCADE
+     )
+''')
+cursor.execute('''
 CREATE TABLE IF NOT EXISTS configurazioneTemperatura(
     nomeAcquario VARCHAR(30) NOT NULL PRIMARY KEY,
     tempMin DECIMAL(10,2),
-    tempMax DECIMAL(10,2)
+    tempMax DECIMAL(10,2),
+    FOREIGN KEY (nomeAcquario) REFERENCES acquario(nome) ON DELETE CASCADE
    )
 ''')
 cursor.execute(
@@ -24,7 +49,8 @@ cursor.execute(
     CREATE TABLE IF NOT EXISTS configurazionePh(
         nomeAcquario VARCHAR(30) NOT NULL PRIMARY KEY,
         phMin DECIMAL(10,2),
-        phMax DECIMAL(10,2)
+        phMax DECIMAL(10,2),
+        FOREIGN KEY (nomeAcquario) REFERENCES acquario(nome) ON DELETE CASCADE
     )
     '''
 )
@@ -33,37 +59,27 @@ cursor.execute(
         CREATE TABLE IF NOT EXISTS configurazioneLivello(
             nomeAcquario VARCHAR(30) NOT NULL PRIMARY KEY,
             lvlMin DECIMAL(10,2),
-            lvlMax DECIMAL(10,2 )
+            lvlMax DECIMAL(10,2),
+            FOREIGN KEY (nomeAcquario) REFERENCES acquario(nome) ON DELETE CASCADE
         )
     '''
 )
 
-#CREARE LA TABELLA CHE RAPPRESENTA I DATI INVIATI DA ARDUINO 
-cursor.execute('''
-    CREATE TABLE IF NOT EXISTS datiAcquario(
-        idMisurazione INTEGER PRIMARY KEY AUTOINCREMENT,
-        nomeAcquario TEXT NOT NULL,
-        data DATETIME,
-        tipoMisurazione VARCHAR(30) NOT NULL,
-        misurazione DECIMAL(10,2),
-        FOREIGN KEY (nomeAcquario) REFERENCES acquario(nome) ON DELETE CASCADE
-    )
-''')   
+
 def on_connect(client,userdata,flags, reason_code,properties):
     print(f"Connesso al broker con risultato {reason_code}")
     client.subscribe("acquari/nome")
-    
-    
-def addValToDb(nome,tipoMisurazione,misurazione):
-    cursor.execute('''
-                    INSERT INTO datiAcquario(nomeAcquario,
-                                             data,
-                                             tipoMisurazione,
-                                             misurazione
-                                            )VALUES(?,?,?,?);
-                    ''',(nome,datetime.now().replace(microsecond=0),tipoMisurazione,misurazione))
-    database.commit()
-    print(f"Salvato sul db : {nome}, {tipoMisurazione}, {misurazione}")
+    client.subscribe("stato/#")
+
+
+def addValToDbInflux(msg):
+    datiAcquario = [
+        Point("Acquari")
+        .tag("Acquario",msg.topic.split("/")[-3])
+        .field(msg.topic.split("/")[-1],float(msg.payload.decode()))
+    ]
+    return datiAcquario
+
 
 def topicBuilder(client,userdata,msg,subtopic):
     if(msg.topic.split("/")[-1] == "nome"):
@@ -87,30 +103,61 @@ def on_message(client,userdata,msg):
             topicBuilder(client,userdata,msg,"/sensori/#")
             topicBuilder(client,userdata,msg,"/configurazione/#")
         if msg.topic.split("/")[-2]=="sensori":
-                addValToDb(msg.topic.split("/")[-3],msg.topic.split("/")[-1],float(msg.payload.decode()))
+                influxClient.write(addValToDbInflux(msg), write_precision='s')
         if msg.topic.split("/")[-2]=="valoreLimite":
             inserisciConfigurazione(msg)
         if msg.topic.split("/")[-2]=="litraggio":
             inserisciConfigurazione(msg)
+    if msg.topic.split("/")[-2]=="stato":
+        nome = msg.topic.split("/")[-1]
+        stato = msg.payload.decode('utf-8')
+        cursor.execute(
+            "INSERT INTO statoAcquario (nomeAcquario, statoAcquario) VALUES (?, ?) "
+            "ON CONFLICT(nomeAcquario) DO UPDATE SET statoAcquario = excluded.statoAcquario",
+            (nome, stato),
+        )
+        database.commit()
+
 
 def inserisciConfigurazione(msg):
+    nome = msg.topic.split("/")[-4]
     match msg.topic.split("/")[-1]:
         case "ph":
-            cursor.execute('''
-                INSERT INTO configurazionePh(nomeAcquario,phMin,phMax
-                ) VALUES(?,?,?);
-            ''',(msg.topic.split("/")[-4],float(msg.payload.decode().split(",")[0]),float(msg.payload.decode().split(",")[1])))        
+            
+            ph_min, ph_max = float(msg.payload.decode().split(",")[0]),float(msg.payload.decode().split(",")[1])
+
+            cursor.execute(
+                "INSERT OR IGNORE INTO configurazionePh(nomeAcquario, phMin, phMax) VALUES (?, ?, ?)",
+                (nome, ph_min, ph_max),
+            )
+            cursor.execute(
+                "UPDATE configurazionePh SET phMin = ?, phMax = ? WHERE nomeAcquario = ?",
+                (ph_min, ph_max, nome),
+            )
             database.commit()
         case "tmp":
-            cursor.execute('''
-                INSERT INTO configurazioneTemperatura(nomeAcquario,tempMin,tempMax
-                ) VALUES(?,?,?);
-            ''',(msg.topic.split("/")[-4],float(msg.payload.decode().split(",")[0]),float(msg.payload.decode().split(",")[1])))
+            tempMin, tempMax =  float(msg.payload.decode().split(",")[0]),float(msg.payload.decode().split(",")[1])
+            
+            cursor.execute(
+                "INSERT OR IGNORE INTO configurazioneTemperatura(nomeAcquario, tempMin, tempMax) VALUES (?, ?, ?)",
+                (nome, tempMin, tempMax),
+            )
+            cursor.execute(
+                "UPDATE configurazioneTemperatura SET tempMin = ?, tempMax = ? WHERE nomeAcquario = ?",
+                (tempMin, tempMax, nome),
+            )
             database.commit()
         case "lvl":
-            cursor.execute('''
-                INSERT INTO configurazioneLivello(nomeAcquario,lvlMin,lvlMax)VALUES(?,?,?)
-            ''',(msg.topic.split("/")[-4],float(msg.payload.decode().split(",")[0]),float(msg.payload.decode().split(",")[1])))
+            lvlMin, lvlMax =float(msg.payload.decode().split(",")[0]),float(msg.payload.decode().split(",")[1])
+           
+            cursor.execute(
+                "INSERT OR IGNORE INTO configurazioneLivello(nomeAcquario, lvlMin, lvlMax) VALUES (?, ?, ?)",
+                (nome, lvlMin,lvlMax),
+            )
+            cursor.execute(
+                "UPDATE configurazioneLivello SET lvlMin = ?, lvlMax = ? WHERE nomeAcquario = ?",
+                (lvlMin, lvlMax, nome),
+            )
             database.commit()
 
         case "litri":
@@ -118,7 +165,7 @@ def inserisciConfigurazione(msg):
                 UPDATE acquario
                 SET litri = ?
                 WHERE nome = ?
-            ''',(float(msg.payload.decode()),msg.topic.split("/")[-4]))
+            ''',(float(msg.payload.decode()),nome))
             database.commit()
 
  
@@ -129,4 +176,4 @@ mqttClient.on_message = on_message
 mqttClient.connect(IP,1883,60)
 
 
-mqttClient.loop_forever() 
+mqttClient.loop_forever()
