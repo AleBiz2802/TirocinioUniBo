@@ -41,12 +41,19 @@ def topicBuilder(client,msg,subtopic):
 
 def topicPublisher(msg):
     topic = msg.topic.split("/")
+    val = float(msg.payload.decode())
     acquario = topic[-3]
     tipo = topic[-1]
     baseTopic = "acquari/" + acquario + "/attuatori/"
+    statoAcquario = cursor.execute('''
+                        SELECT  stato
+                        FROM statoAcquario
+                        WHERE nomeAcquario = ?
+                        ''',(acquario,)).fetchone()
+    
     if tipo not in ("tmp","lvl"):
         return
-
+    
     intervallo = searchValInDb(acquario,tipo)
     if intervallo is not None:
         valMin,valMax = intervallo[0],intervallo[1]
@@ -59,6 +66,7 @@ def topicPublisher(msg):
             else:
                  mqttClient.publish(baseTopic+"risc","HIGH")
         case "lvl":
+            if statoAcquario!= "CAMBIO_ACQUA":
                 if float(msg.payload.decode())>=valMax:
                     mqttClient.publish(baseTopic+"pr","LOW")
                     mqttClient.publish(baseTopic+"ps","HIGH")
@@ -68,7 +76,8 @@ def topicPublisher(msg):
                 else : 
                     mqttClient.publish(baseTopic+"pr","LOW")
                     mqttClient.publish(baseTopic+"ps","LOW")
-            
+            """Aggiungere logica per la gestione del livello dell'acqua durante un cambio d'acqua"""
+
 def searchValInDb(nomeAcquario,tipoMisurazione):
     if tipoMisurazione == "ph":
 
@@ -130,6 +139,7 @@ def computePhMean():
             mqttClient.publish("acquari/"+str(p["Acquario"])+"/attuatori/ps", "HIGH")
             mqttClient.publish("stato/"+str(p["Acquario"]),"CAMBIO_ACQUA")
 
+
 def trigger(target: time):
 
     targettime = datetime.now().replace(hour=target.hour, minute=target.minute, second=0, microsecond=0)
@@ -141,13 +151,37 @@ def trigger(target: time):
 
     computePhMean()
 
+#impostare sessione di gestione luci, quando si è fuori dal tempo di illuminazione si spengono le luci
+def setLights():
+    while True:
+        try:
+            righe = cursor.execute(
+                "SELECT nomeAcquario, accensione, spegnimento FROM configurazioneLuci"
+            ).fetchall()
+            adesso = datetime.now().time()
+            for nome, acc, spe in righe:
+                if not acc or not spe:
+                    continue
+                on = datetime.strptime(acc.strip(), "%H:%M").time()
+                off = datetime.strptime(spe.strip(), "%H:%M").time()
+                if on <= off:
+                    accesa = on <= adesso < off
+                else:  # l'intervallo attraversa la mezzanotte
+                    accesa = adesso >= on or adesso < off
+                mqttClient.publish(f"acquari/{nome}/attuatori/luce",
+                                   "LOW" if accesa else "HIGH", retain=True)
+        except Exception as e:
+            print("setLights:", e)
+        tm.sleep(30)
+    
 mqttClient = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 mqttClient.on_connect = on_connect
 mqttClient.on_message = on_message
 
 mqttClient.connect(IP,1883,60)
 
-threading.Thread(target=trigger, args=(time(20,30),),daemon=True).start()
+threading.Thread(target=trigger, args=(time(22,30),),daemon=True).start()
+threading.Thread(target=setLights,daemon=True).start()
 mqttClient.loop_forever()
 
 
