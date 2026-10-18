@@ -10,29 +10,20 @@ BLEByteCharacteristic dataNotifyingCharacteristic("19B10012-E8F2-537E-4F6C-D1047
 
 /* IMPOSTAZIONI WIFI*/
 bool wifiConfigurato = false;
-bool mqttConfigurato = false;
-bool mqttAttivato = false;
 String ssid = "";
 String password = "";
 
 /*IMPOSTAZIONI MQTT*/
 String mqttbkr = "";
 String nome = "";
+bool mqttConfigurato = false;
+bool mqttAttivato = false;
+bool check = false;
 
 WiFiClient clientWiFi;
 PubSubClient client(clientWiFi);
 
 /*PARAMETRI DA CONFIGURARE VIA APP ( TRAMITE ISCRIZIONE A TOPIC MQTT configurazione/#)*/
-float phMax;
-float phMin;
-
-float livelloAcquaMin;
-float livelloAcquaMax;
-
-float livelloPhMax;
-float livelloPhMin;
-
-
 unsigned long campionamentoPh;
 unsigned long ultimoCampionamentoPh = 0 ;
 unsigned long campionamentoTmp;
@@ -41,18 +32,26 @@ unsigned long campionamentoLivelloAcqua;
 unsigned long ultimoCampionamentoLivelloAcqua = 0;
 unsigned long tempo = 0 ;
 int campionamentiImpostati = 0;
-int check = 0;
+
 
 /*valori di prova*/
 float ph = 10;
 float livelloAcqua =  30.0;
 float temperatura  = 9.0;
 
+/*Campionamenti da sensori*/
+float phVal;
+float tmpVal;
+float lvlAcquaVal;
+
+/*Valori di stato degli attuatori*/
+bool OUT_PUMP,IN_PUMP,HEAT,LIGHT,FILTER;
 
 
 /*Inizializzazione sensori*/
 OneWire oneWire(TEMPERATURA);
-DallasTemperature(&oneWire);
+DallasTemperature sensore(&oneWire);
+DeviceAddress indirizzo;
 
 /*Spazio per attuatori*/
 void setup() {
@@ -75,32 +74,10 @@ void setup() {
   BLE.advertise();
   Serial.println("Acquario in attesa di connessioni"); 
   dataNotifyingCharacteristic.writeValue(1);
-  /*
-
-  WiFi.begin(ssid,password);
-  while(WiFi.status()!=WL_CONNECTED){
-    delay(1000);
-    Serial.println("Connessione al wifi in corso");
-  }
-  Serial.println("Connesso al wifi");
-  client.setServer(mqttbkr.c_str(),1883);
-  client.setCallback(callback);
-  while(!client.connected()){
-    Serial.println("CONNESSIONE AL BROKER MQTT");
-    if(client.connect(nome.c_str())){
-      Serial.println("CONNESSIONE EFFETTUATA");
-       client.subscribe(createTopic(nome,8).c_str());
-    }else{
-      Serial.print("Fallito, rc = ");
-      Serial.print(client.state());
-      Serial.println("Riprovare"); 
-      delay(5000);
-    }
-  }
-*/ 
 
   Wire.begin();
-  pinMode(LIVELL0_TANICA_1,INPUT);
+
+  pinMode(LIVELLO_TANICA_1,INPUT);
   pinMode(LIVELLO_ACQUA_3,INPUT);
   pinMode(LIVELLO_PH,INPUT);
   pinMode(13,OUTPUT);
@@ -109,7 +86,7 @@ void setup() {
   pinMode(POMPA_IN,OUTPUT);
   pinMode(ILLUMINAZIONE,OUTPUT);
   pinMode(VENTOLA,OUTPUT);
-  pinMode(RISCALDATORE;OUTPUT);
+  pinMode(RISCALDATORE,OUTPUT);
 
   digitalWrite(POMPA_IN,HIGH);
   digitalWrite(POMPA_OUT,HIGH);
@@ -136,15 +113,15 @@ void loop() {
       wifiConfigurato = true;
       unsigned long t = millis();
       while (millis() - t < 500) 
-      BLE.poll();
+        BLE.poll();
 
       BLE.disconnect();
       BLE.stopAdvertise();
       BLE.end();
-    delay(500);
-    WiFi.begin(ssid.c_str(),password.c_str());
-    Serial.println(ssid.c_str());
-    Serial.println(password.c_str());
+      delay(500);
+      WiFi.begin(ssid.c_str(),password.c_str());
+      Serial.println(ssid.c_str());
+      Serial.println(password.c_str());
     }
  
     
@@ -182,19 +159,40 @@ void loop() {
           Serial.println("Riconnessione al broker ");
           client.connect(nome.c_str());
         }
-        if(check == 0){
+        if(check == false){
           client.publish("acquari/nome",nome.c_str());
-          check = 1;
+          check = true;
         }
         
         //client.publish("test/mqtt","Messaggio di test da arduino giga");
-       
-        publishFloatVals(ph,0,ultimoCampionamentoPh,campionamentoPh);
-        publishFloatVals(livelloAcqua,1,ultimoCampionamentoLivelloAcqua,campionamentoLivelloAcqua);
-        publishFloatVals(temperatura,2,ultimoCampionamentoTmp,campionamentoTmp);
-      
+
+        //LETTURA DELLE GRANDEZZE
+        /*
+        sensore.requestTemperatures();
+        sensore.getAddress(indirizzo,0);
+        if(sensore.isConnected(indirizzo)){
+          tmpVal = sensore.getTempCByIndex(0);
+        }else{
+          sensore.getAddress(indirizzo,1);
+          if(sensore.isConnected(indirizzo)){
+            tmpVal = sensore.getTempCByIndex(1);
+          }else{
+            tmpVal = -127;
+          }
+          
+        }
+        */
+        //phVal = getPhVal();
+        //lvlAcquaVal = analogRead(LIVELLO_ACQUA_3);
+        publishSensorValues(ph,0,ultimoCampionamentoPh,campionamentoPh);
+        publishSensorValues(livelloAcqua,1,ultimoCampionamentoLivelloAcqua,campionamentoLivelloAcqua);
+        publishSensorValues(temperatura,2,ultimoCampionamentoTmp,campionamentoTmp);
+        digitalWrite(POMPA_OUT,OUT_PUMP);
+        digitalWrite(POMPA_IN,IN_PUMP);
+        digitalWrite(FILTRO,FILTER);
+        digitalWrite(ILLUMINAZIONE,LIGHT);
+        
         client.loop();
-       // delay(5000);
       }
     }
   }
@@ -203,18 +201,18 @@ void loop() {
   
 }
 
-void publishFloatVals(PubSubClient& t, float val, String topic) {
+void publishSensorValues(PubSubClient& t, float val, String topic) {
     char msg[20];
     snprintf(msg, sizeof(msg), "%1.2f", val);
     t.publish(topic.c_str(), msg);
 }   
 
-void publishFloatVals(float val, int n, unsigned long &ultimoInvio, unsigned long intervallo){
+void publishSensorValues(float val, int n, unsigned long &ultimoInvio, unsigned long intervallo){
   //unsigned long tempoPrev = 0;
   if(intervallo!=0){
       if(millis()-ultimoInvio>=intervallo){
       ultimoInvio= millis();
-      publishFloatVals(client,val,createTopic(nome,n));
+      publishSensorValues(client,val,createTopic(nome,n));
        Serial.println("Messaggio inviato"); 
     }
   }
@@ -236,19 +234,25 @@ void callback(char* topic, byte* payload, unsigned int length) {
   
 
     if (topicStr == createTopic(nome,4)) {
-        // pompa a immersione
+        // pompa a immersione di riempimento
        // digitalWrite(PIN_POMPAR, msg == "ON" ? HIGH : LOW);
+       IN_PUMP = (bool)msg;
        Serial.println("POMPA RIEMPIMENTO: " + msg);
 
     } else if (topicStr == createTopic(nome,5)) {
-        // pompa a superficie
+        // pompa a immersione di svuotamento
        // digitalWrite(PIN_POMPAS, msg == "ON" ? HIGH : LOW);
+       OUT_PUMP = (bool)msg;
        Serial.println("POMPA SVUOTAMENTO: " + msg);
 
     } else if (topicStr == createTopic(nome,6)) {
         // riscaldatore
        // digitalWrite(PIN_RISC, msg == "ON" ? HIGH : LOW);
+       HEAT = (bool)msg;
        Serial.println("RISCALDATORE: " + msg);
+    } else if(topicStr == createTopic(nome,7)){
+      LIGHT = (bool)msg;
+      Serial.println("LUCI: "+msg);
     } else if( topicStr ==  createTopic(nome,10)){
         int val = msg.toInt();
         campionamentoPh = 1000*val;
@@ -261,11 +265,13 @@ void callback(char* topic, byte* payload, unsigned int length) {
         int val = msg.toInt();
         campionamentoTmp = 1000*val;
         Serial.print("Campionamento temperatura: ");Serial.print(campionamentoTmp);Serial.print("\n");
+    } else if(topicStr == createTopic(nome,13)){
+        FILTER = (bool)msg;
     }
 }
 
 String createTopic(String nome, int pos) {
-    const char* suffix[13] = {
+    const char* paths[14] = {
         "sensori/ph", 
         "sensori/lvl",
         "sensori/tmp",
@@ -278,10 +284,11 @@ String createTopic(String nome, int pos) {
         "configurazione/#",
         "configurazione/temporizzazione/tempoPh",
         "configurazione/temporizzazione/tempoLivelloAcqua",
-        "configurazione/temporizzazione/tempoTemperatura"
+        "configurazione/temporizzazione/tempoTemperatura",
+        "attuatori/filtro"
     };
 
-    return "acquari/" + nome + "/" + String(suffix[pos]);
+    return "acquari/" + nome + "/" + String(paths[pos]);
 }
 
 // Estrae il campo in posizione "pos" da toTokenize, usando c come separatore.
@@ -303,4 +310,36 @@ String tokenize(String toTokenize, char c, int pos){
   return ""; // posizione non trovata
 }
 
+float getPhVal(){
+  int campioni[CAMPIONI];
+  unsigned long ultimoInvio = 0;
+  for(int i =0; i <CAMPIONI; i++){
+    if(millis()-ultimoInvio>=30){
+      campioni[i] = analogRead(LIVELLO_PH);
+    }
+  }
+  //ordinamento per rimuovere i valori estremi
+  for(int i =0; i<CAMPIONI-1;i++){
+    for(int j = i+1; j<CAMPIONI;j++){
+      if(campioni[i]>campioni[j]){
+        int temp = campioni[i];
+        campioni[i] = campioni[j];
+        campioni[j]=temp;
+      }
+    }
+  }
+  //media dei valori ad esclusione dei 2 più alti e dei 2 più bassi
+  long media =0;
+  for(int i =2; i<CAMPIONI-2; i++){
+    media+=campioni[i];
+  }
 
+  //conversione del dato in da voltaggio a valore numerico
+  float phVolt = (float)media*5.0/1024/6;
+  float ph = -5.54*phVolt + 20.84;
+  if(ph<=0){
+   return ph*-1;  
+  }else{
+    return ph;
+  }
+}
