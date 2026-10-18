@@ -32,7 +32,7 @@ cursor.execute('''
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS statoAcquario(
         nomeAcquario VARCHAR (30) NOT NULL PRIMARY KEY,
-        statoAcquario VARCHAR (20),
+        stato VARCHAR (20),
         FOREIGN KEY (nomeAcquario) REFERENCES acquario(nome) ON DELETE CASCADE
      )
 ''')
@@ -64,7 +64,16 @@ cursor.execute(
         )
     '''
 )
-
+cursor.execute(
+    '''
+        CREATE TABLE IF NOT EXISTS configurazioneLuci(
+            nomeAcquario VARCHAR(30) NOT NULL PRIMARY KEY,
+            accensione TEXT,
+            spegnimento TEXT,
+            FOREIGN KEY (nomeAcquario)REFERENCES acquario(nome)ON DELETE CASCADE
+        );
+    '''
+)
 
 def on_connect(client,userdata,flags, reason_code,properties):
     print(f"Connesso al broker con risultato {reason_code}")
@@ -104,16 +113,15 @@ def on_message(client,userdata,msg):
             topicBuilder(client,userdata,msg,"/configurazione/#")
         if msg.topic.split("/")[-2]=="sensori":
                 influxClient.write(addValToDbInflux(msg), write_precision='s')
-        if msg.topic.split("/")[-2]=="valoreLimite":
+        if msg.topic.split("/")[-2]in  ("valoreLimite","litraggio","luci"):
             inserisciConfigurazione(msg)
-        if msg.topic.split("/")[-2]=="litraggio":
-            inserisciConfigurazione(msg)
+         
     if msg.topic.split("/")[-2]=="stato":
         nome = msg.topic.split("/")[-1]
         stato = msg.payload.decode('utf-8')
         cursor.execute(
-            "INSERT INTO statoAcquario (nomeAcquario, statoAcquario) VALUES (?, ?) "
-            "ON CONFLICT(nomeAcquario) DO UPDATE SET statoAcquario = excluded.statoAcquario",
+            "INSERT INTO statoAcquario (nomeAcquario, stato) VALUES (?, ?) "
+            "ON CONFLICT(nomeAcquario) DO UPDATE SET stato = excluded.stato",
             (nome, stato),
         )
         database.commit()
@@ -158,6 +166,17 @@ def inserisciConfigurazione(msg):
                 "UPDATE configurazioneLivello SET lvlMin = ?, lvlMax = ? WHERE nomeAcquario = ?",
                 (lvlMin, lvlMax, nome),
             )
+            database.commit()
+        case "luci":
+            accensione,spegnimento = str(msg.payload.decode("utf-8").split(",")[0]),str(msg.payload.decode("utf-8").split(",")[1])
+            cursor.execute(
+                            "INSERT OR IGNORE INTO configurazioneLuci(nomeAcquario, accensione, spegnimento) VALUES (?, ?, ?)",
+                            (nome, accensione,spegnimento),
+                        )
+            cursor.execute(
+                            "UPDATE configurazioneLuci SET accensione= ?, spegnimento= ? WHERE nomeAcquario = ?",
+                            (accensione, spegnimento, nome),
+                        )
             database.commit()
 
         case "litri":
