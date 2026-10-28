@@ -96,15 +96,16 @@ def topicPublisher(msg):
             attuale =(litri/(pieno-vuoto))*(float(msg.payload.decode())-vuoto)
             
             print(f"valore massimo:{valMax}, valore minimo: {valMin}, valCambio: {cambio}")
-            if statoAcquario != "CAMBIO_ACQUA":
+            if statoAcquario != "CAMBIO_ACQUA" or statoAcquario != "CONFIGURAZIONE":
                 if not(min<=attuale<=max):
                     if attuale<min:
                         mqttClient.publish(baseTopic+"pr","HIGH")
-            else:
+            elif statoAcquario=="CAMBIO_ACQUA":
                 if attuale<=cambio:
                    mqttClient.publish(baseTopic+"pr","HIGH")
                 elif attuale>=max:
                     mqttClient.publish(baseTopic+"pr","LOW")
+                    mqttClient.publish("acquari/"+acquario+"/notifiche/cambioAcqua",True)
                 
             
                         
@@ -139,27 +140,46 @@ def searchValInDb(nomeAcquario,tipoMisurazione):
 def manualMode(msg):
     if msg.topic.split("/")[-1] == "manual":
         baseTopic = "acquari/" + msg.topic.split("/")[-2] + "/attuatori/"
-        match str(msg.payload.decode("utf-8")):
-            case "svuotamento":
-                mqttClient.publish(baseTopic+"ps","HIGH")
-                mqttClient.publish(baseTopic+"pr","LOW")
-            case "riempimento":
-                mqttClient.publish(baseTopic+"ps","LOW")
-                mqttClient.publish(baseTopic+"pr","HIGH")
-            case "stop":
-                mqttClient.publish(baseTopic+"ps","LOW")
-                mqttClient.publish(baseTopic+"pr","LOW")
-            case  "riscaldamento":
-                mqttClient.publish(baseTopic+"risc","HIGH")
-            case "raffreddamento":
-                mqttClient.publish(baseTopic+"risc","LOW")
-            case "spegni":
-                   mqttClient.publish(baseTopic+"ps","LOW")
-                   mqttClient.publish(baseTopic+"pr","LOW")
-                   mqttClient.publish(baseTopic+"luce","LOW")
-                   mqttClient.publish(baseTopic+"filtro","LOW")
-                   mqttClient.publish(baseTopic+"risc","LOW")
-        
+        stato = cursor.execute(
+            '''
+                SELECT stato
+                FROM statoAcquario
+                WHERE nomeAcquario = ?
+            ''',(msg.topic.split("/")[-2],)
+        ).fetchone()
+        if stato not in ("CAMBIO_ACQUA","CONFIGURAZIONE"):
+            match str(msg.payload.decode("utf-8")):
+                case "svuotamento":
+                    mqttClient.publish(baseTopic+"ps","HIGH")
+                    mqttClient.publish(baseTopic+"pr","LOW")
+                    
+                case "riempimento":
+                    mqttClient.publish(baseTopic+"ps","LOW")
+                    mqttClient.publish(baseTopic+"pr","HIGH")
+                case "stop":
+                    mqttClient.publish(baseTopic+"ps","LOW")
+                    mqttClient.publish(baseTopic+"pr","LOW")
+                case  "riscaldamentoOn":
+                    mqttClient.publish(baseTopic+"risc","HIGH")
+                case "riscaldamentoOff":
+                    mqttClient.publish(baseTopic+"risc","LOW")
+                
+                case "spegni":
+                        mqttClient.publish(baseTopic+"ps","LOW")
+                        mqttClient.publish(baseTopic+"pr","LOW")
+                        mqttClient.publish(baseTopic+"luce","HIGH")
+                        mqttClient.publish(baseTopic+"filtro","LOW")
+                        mqttClient.publish(baseTopic+"risc","LOW")
+                        mqttClient.publish(f"acquari/{msg.topic.split("/")[-2]}/notifiche/spento",True)
+                case "accendi":
+                        mqttClient.publish(baseTopic+"luce","LOW")
+                        mqttClient.publish(baseTopic+"filtro","HIGH")
+                        mqttClient.publish(f"acquari/{msg.topic.split("/")[-2]}/notifiche/acceso",True)
+                case "luceOn": 
+                    mqttClient.publish(baseTopic+"luce","LOW")
+                case "luceOff":
+                    mqttClient.publish(baseTopic+"luce","HIGH")
+                        
             
             
 def checkValuesAndTakeAction(msg):
@@ -173,10 +193,11 @@ def checkValuesAndTakeAction(msg):
         (nome_acquario,)
     ).fetchone()
     mode = row[0].upper() if row and row[0] else None
-
+    
     if mode == "AUTO":
         if parts[-2] == "sensori":
             topicPublisher(msg)
+
     elif mode == "MANUAL":
         manualMode(msg)
         
@@ -194,9 +215,20 @@ def computePhMean():
             language="sql",
             timeout=10
         ).to_pylist()
+    acquariAuto = {
+        riga[0] for riga in cursor.execute(
+        """
+        SELECT nome
+        FROM acquario
+        WHERE mode = 'AUTO'
+        """
+        ).fetchall()
+    }
     
     for p in phValues:
+        nomeAcq = str(p["Acquario"])
         intervallo = searchValInDb(str(p["Acquario"]),"ph")
+        
         if intervallo is None:
             continue
 
@@ -205,9 +237,13 @@ def computePhMean():
         if phMin is None or phMax is None or p["ph_medio"] is None:
             continue
 
-        if not (phMin<=p["ph_medio"]<=phMax):
-            mqttClient.publish("acquari/"+str(p["Acquario"])+"/attuatori/ps", "HIGH")
+        if not (phMin<=p["ph_medio"]<=phMax) and p["Acquario"] and nomeAcq in acquariAuto:
             mqttClient.publish("stato/"+str(p["Acquario"]),"CAMBIO_ACQUA")
+            mqttClient.publish("acquari/"+p["Acquario"]+"/notifiche/cambioAcqua","false")
+            mqttClient.publish("acquari/"+str(p["Acquario"])+"/attuatori/ps", "HIGH")
+           
+        elif  not (phMin<=p["ph_medio"]<=phMax) and p["Acquario"] and nomeAcq in acquariAuto:
+            mqttClient.publish("acquari/"+p["Acquario"]+"/notifiche/cambioAcqua","false")
 
 
 def trigger(target: time):
@@ -221,30 +257,45 @@ def trigger(target: time):
 
     computePhMean()
 
-#impostare sessione di gestione luci, quando si è fuori dal tempo di illuminazione si spengono le luci
 def setLights():
+    statoLuci = {} 
     while True:
         try:
             righe = cursor.execute(
-                "SELECT nomeAcquario, accensione, spegnimento FROM configurazioneLuci"
+                """
+                SELECT cL.nomeAcquario, cL.accensione, cL.spegnimento
+                FROM configurazioneLuci AS cL
+                JOIN acquario AS a ON cL.nomeAcquario = a.nome
+                WHERE a.mode = 'AUTO'
+                """
             ).fetchall()
             adesso = datetime.now().time()
+
             for nome, acc, spe in righe:
-                if not acc or not spe:
-                    continue
-                on = datetime.strptime(acc.strip(), "%H:%M").time()
-                off = datetime.strptime(spe.strip(), "%H:%M").time()
-                if on <= off:
-                    accesa = on <= adesso < off
-                else:  # l'intervallo attraversa la mezzanotte
-                    accesa = adesso >= on or adesso < off
-                mqttClient.publish(f"acquari/{nome}/attuatori/luce",
-                                   "LOW" if accesa else "HIGH", retain=True)
+                try:
+                    if not acc or not spe:
+                        continue
+                    on = datetime.strptime(acc.strip(), "%H:%M").time()
+                    off = datetime.strptime(spe.strip(), "%H:%M").time()
+
+                    if on <= off:
+                        accesa = on <= adesso < off
+                    else: 
+                        accesa = adesso >= on or adesso < off
+
+                    mqttClient.publish(f"acquari/{nome}/attuatori/luce",
+                                       "LOW" if accesa else "HIGH", retain=True)
+
+                   
+                    if statoLuci.get(nome) != accesa:
+                        statoLuci[nome] = accesa
+                        mqttClient.publish(f"acquari/{nome}/notifiche/luci",
+                                           "true" if accesa else "false")
+                except Exception as e:
+                    print(f"setLights ({nome}):", e)
         except Exception as e:
             print("setLights:", e)
         tm.sleep(30)
-
-    
 
 
         
