@@ -82,6 +82,12 @@ cursor.execute(
 
 
 
+def acquarioEsiste(nome):
+    return cursor.execute(
+        "SELECT 1 FROM acquario WHERE nome = ?", (nome,)
+    ).fetchone() is not None
+
+
 def on_connect(client,userdata,flags, reason_code,properties):
     print(f"Connesso al broker con risultato {reason_code}")
     client.subscribe("acquari/nome")
@@ -112,6 +118,15 @@ def topicBuilder(client,userdata,msg,subtopic):
         print(f"Iscritto al topic: acquari/"+str(msg.payload.decode('utf-8'))+subtopic)
 
 def on_message(client,userdata,msg):
+    try:
+        gestisciMessaggio(client,userdata,msg)
+    except Exception as e:
+        # un errore su un messaggio non deve fermare il client MQTT
+        database.rollback()
+        print(f"on_message errore su {msg.topic}: {e!r}")
+
+
+def gestisciMessaggio(client,userdata,msg):
     if msg.topic == "elimina":
         nome = msg.payload.decode("utf-8")
         client.unsubscribe(f"acquari/{nome}/sensori/#")
@@ -120,6 +135,9 @@ def on_message(client,userdata,msg):
         client.unsubscribe(f"acquari/{nome}/mode")
         cursor.execute("DELETE FROM acquario WHERE nome = ?", (nome,))
         database.commit()
+        # svuota il messaggio retained, altrimenti alla prossima connessione
+        # arriva uno stato per un acquario che non esiste piu'
+        client.publish(f"stato/{nome}", None, retain=True)
         return
     elif msg.topic.split("/")[0]=="acquari":
         if msg.topic.split("/")[-1]=="nome":
@@ -175,9 +193,18 @@ def on_message(client,userdata,msg):
     elif msg.topic.split("/")[-2]=="stato":
         nome = msg.topic.split("/")[-1]
         stato = msg.payload.decode('utf-8')
+        
+        if not stato:
+            return  # retained cancellato
+        if not acquarioEsiste(nome):
+            print(f"Stato ignorato: acquario '{nome}' non presente nel DB")
+            return
+
         cursor.execute(
-            "INSERT INTO statoAcquario (nomeAcquario, stato) VALUES (?, ?) "
-            "ON CONFLICT(nomeAcquario) DO UPDATE SET stato = excluded.stato",
+            """
+            INSERT INTO statoAcquario(nomeAcquario, stato) VALUES (?, ?)
+            ON CONFLICT(nomeAcquario) DO UPDATE SET stato = excluded.stato
+            """,
             (nome, stato),
         )
         database.commit()
@@ -187,6 +214,9 @@ def on_message(client,userdata,msg):
 
 def inserisciConfigurazione(msg):
     nome = msg.topic.split("/")[-4]
+    if not acquarioEsiste(nome):
+        print(f"Configurazione ignorata: acquario '{nome}' non presente nel DB")
+        return
     match msg.topic.split("/")[-1]:
         case "ph":
             
