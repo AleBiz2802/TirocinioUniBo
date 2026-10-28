@@ -1,0 +1,19 @@
+
+1) Aggiungere i pulsanti di stop riempimento / svuotamento e il pulsante accendi  all'app 
+
+2) All'inizio e alla fine di un cambio d'acqua pubblicare sul topic acquari/nomeAcquario/notifiche/cambioAcqua true o false
+   Quando il livello dell'acqua viene ripristinato, pubblicare sul topic acquari/nomeAcquario/notifiche/livelloAcqua true
+   Quando la temperatura dell'acqua viene ripristinata, pubblicare sul topic acquari/nomeAcquario/notifiche/temepraturaAcqua true
+   Quando le luci della vasca vengono accese o spente, pubblicare sul topic acquari/nomeAcquario/notifiche/luci true o false
+   
+
+
+3) Loggare su influxDb lo stato degli attuatori per ogni acquario
+
+4) Impedire il cambio d'acqua agli acquari con mode : manual
+
+5) Non ha senso inviare in continuazione i comandi di high e low, basta inviarli al verificarsi di determinati eventi
+
+6) Aggiungere il retain ai messaggi di eliminazione degli acquari
+
+6) Rendere raggiungibile mqtt dalla rete wan

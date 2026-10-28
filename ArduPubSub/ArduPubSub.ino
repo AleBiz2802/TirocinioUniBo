@@ -327,8 +327,10 @@ void callback(char* topic, byte* payload, unsigned int length) {
           else
           FILTER = HIGH;
     } else if (topicStr == createTopic(nome,14)){
-      if(msg == "attiva")
-        campionaUltrasuoni = true;
+      if(limit1){
+        if(msg == "attiva")
+          campionaUltrasuoni = true;
+      }
     }
 }
 
