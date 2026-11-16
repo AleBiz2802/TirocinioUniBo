@@ -93,22 +93,36 @@ def on_connect(client,userdata,flags, reason_code,properties):
     client.subscribe("acquari/nome")
     client.subscribe("stato/#")
     client.subscribe("elimina")
+   
     
     
 
 def addValToDbInflux(msg):
-    datiAcquario = [
-        Point("Acquari")
-        .tag("Acquario",msg.topic.split("/")[-3])
-        .field(msg.topic.split("/")[-1],float(msg.payload.decode()))
-    ]
-    return datiAcquario
-
+    if("lvl" not in msg.topic.split("/")):
+        datiAcquario = [
+            Point("Acquari")
+            .tag("Acquario",msg.topic.split("/")[-3])
+            .field(msg.topic.split("/")[-1],float(msg.payload.decode()))
+        ]
+        return datiAcquario
+    else:
+        if(msg.topic.split("/")[-1] == "attuale"):
+            datiAcquario = [
+                Point("Acquari")
+                .tag("Acquario",msg.topic.split("/")[-4])
+                .field(msg.topic.split("/")[-2],float(msg.payload.decode()))
+            ]
+            return datiAcquario
+        else :
+            return
+        
 def logActuatorState(msg):
+    parts = msg.topic.split("/")
     attuatori = [
         Point("Attuatori")
-        .tag("Attuatore",msg.topic.split("/")[-1])
-        .field(msg.topic.split("/")[-3],msg.payload.decode("utf-8"))
+        .tag("Acquario", parts[-3])
+        .tag("Attuatore", parts[-1])
+        .field("stato", msg.payload.decode("utf-8"))
     ]
     return attuatori
 
@@ -135,8 +149,7 @@ def gestisciMessaggio(client,userdata,msg):
         client.unsubscribe(f"acquari/{nome}/mode")
         cursor.execute("DELETE FROM acquario WHERE nome = ?", (nome,))
         database.commit()
-        # svuota il messaggio retained, altrimenti alla prossima connessione
-        # arriva uno stato per un acquario che non esiste piu'
+     
         client.publish(f"stato/{nome}", None, retain=True)
         return
     elif msg.topic.split("/")[0]=="acquari":
@@ -157,10 +170,11 @@ def gestisciMessaggio(client,userdata,msg):
             topicBuilder(client,userdata,msg,"/ultraSuoni/#")
             topicBuilder(client,userdata,msg,"/mode")
             topicBuilder(client,userdata,msg,"/attuatori/#")
-        if msg.topic.split("/")[-2]=="sensori":
+        if "sensori" in msg.topic.split("/"):
                 influxClient.write(addValToDbInflux(msg), write_precision='s')
         if msg.topic.split("/")[-2]=="attuatori":
                 influxClient.write(logActuatorState(msg), write_precision='s')
+        
         if msg.topic.split("/")[-2]in  ("valoreLimite","litraggio","luce"):
             inserisciConfigurazione(msg)
         if msg.topic.split("/")[-2]=="ultraSuoni":
@@ -279,6 +293,7 @@ def inserisciConfigurazione(msg):
 mqttClient = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 mqttClient.on_connect = on_connect
 mqttClient.on_message = on_message
+mqttClient.will_set("online/mqttPyDbManager","offline")
 mqttClient.connect(IP,1883,60)
 
 
