@@ -48,13 +48,11 @@ def topicPublisher(msg):
     acquario = topic[-3]
     tipo = topic[-1]
 
-    if tipo not in ("tmp","lvl"):
+    if tipo not in ("tmp","lvl","ph"):
         return
 
     val = float(msg.payload.decode())
     baseTopic = "acquari/" + acquario + "/attuatori/"
-
-    # fetchone() ritorna una tupla (o None): estraggo il valore
     riga = cursor.execute('''
                         SELECT stato
                         FROM statoAcquario
@@ -68,11 +66,17 @@ def topicPublisher(msg):
     valMin,valMax = intervallo
 
     match tipo:
+        case "ph":
+            if not (valMin <= val <= valMax):
+                PublishNotificationTopic(acquario,"ph",f"false,{val}")
+    
         case "tmp":
             if val>valMax:
                 mqttClient.publish(baseTopic+"risc","LOW")
+                PublishNotificationTopic(acquario,"tmp",f"false,{val}")
             elif val<valMin:
                 mqttClient.publish(baseTopic+"risc","HIGH")
+                PublishNotificationTopic(acquario,"tmp",f"true,{val}")
 
         case "lvl":
             dati = cursor.execute('''
@@ -93,22 +97,29 @@ def topicPublisher(msg):
             min = litri*(valMin/100)
             
             cambio = litri-(0.2*litri)
-            attuale =(litri/(pieno-vuoto))*(float(msg.payload.decode())-vuoto)
-            
+            attuale =(litri/(vuoto-pieno))*(vuoto-float(msg.payload.decode()))
+            mqttClient.publish("acquari/"+acquario+"/sensori/lvl/attuale",attuale)
             print(f"valore massimo:{valMax}, valore minimo: {valMin}, valCambio: {cambio}")
-            if statoAcquario != "CAMBIO_ACQUA" or statoAcquario != "CONFIGURAZIONE":
+            if statoAcquario not in ("CAMBIO_ACQUA","CONFIGURAZIONE"):
                 if not(min<=attuale<=max):
                     if attuale<min:
+                        PublishNotificationTopic(acquario,"livelloAcqua",f"false,{attuale}")
                         mqttClient.publish(baseTopic+"pr","HIGH")
+                        mqttClient.publish(baseTopic+"ps","LOW")
+                    elif attuale>max:
+                        PublishNotificationTopic(acquario,"livelloAcqua",f"false,{attuale}")
+                        mqttClient.publish(baseTopic+"pr","LOW")
+                        mqttClient.publish(baseTopic+"ps","HIGH")
             elif statoAcquario=="CAMBIO_ACQUA":
                 if attuale<=cambio:
                    mqttClient.publish(baseTopic+"pr","HIGH")
+                   mqttClient.publish(baseTopic+"ps","LOW")
                 elif attuale>=max:
                     mqttClient.publish(baseTopic+"pr","LOW")
-                    mqttClient.publish("acquari/"+acquario+"/notifiche/cambioAcqua",True)
-                
-            
-                        
+                    mqttClient.publish("stato/"+acquario,"OK")
+                    PublishNotificationTopic(acquario,"cambioAcqua","true")
+
+
 def searchValInDb(nomeAcquario,tipoMisurazione):
     if tipoMisurazione == "ph":
         cursor.execute('''
@@ -129,7 +140,6 @@ def searchValInDb(nomeAcquario,tipoMisurazione):
             WHERE nomeAcquario = ?
         ''',(nomeAcquario,))
     else:
-        # tipo non gestito: evito di leggere i risultati di una query precedente
         return None
         
     result = cursor.fetchone()
@@ -152,7 +162,6 @@ def manualMode(msg):
                 case "svuotamento":
                     mqttClient.publish(baseTopic+"ps","HIGH")
                     mqttClient.publish(baseTopic+"pr","LOW")
-                    
                 case "riempimento":
                     mqttClient.publish(baseTopic+"ps","LOW")
                     mqttClient.publish(baseTopic+"pr","HIGH")
@@ -161,8 +170,11 @@ def manualMode(msg):
                     mqttClient.publish(baseTopic+"pr","LOW")
                 case  "riscaldamentoOn":
                     mqttClient.publish(baseTopic+"risc","HIGH")
+                    PublishNotificationTopic(msg.topic.split("/")[-2],"riscaldamento","true")
                 case "riscaldamentoOff":
                     mqttClient.publish(baseTopic+"risc","LOW")
+                    PublishNotificationTopic(msg.topic.split("/")[-2],"riscaldamento","false")
+
                 
                 case "spegni":
                         mqttClient.publish(baseTopic+"ps","LOW")
@@ -177,8 +189,10 @@ def manualMode(msg):
                         mqttClient.publish(f"acquari/{msg.topic.split("/")[-2]}/notifiche/acceso",True)
                 case "luceOn": 
                     mqttClient.publish(baseTopic+"luce","LOW")
+                    PublishNotificationTopic(msg.topic.split("/")[-2],"luce","true")
                 case "luceOff":
                     mqttClient.publish(baseTopic+"luce","HIGH")
+                    PublishNotificationTopic(msg.topic.split("/")[-2],"luce","false")
                         
             
             
@@ -200,8 +214,15 @@ def checkValuesAndTakeAction(msg):
 
     elif mode == "MANUAL":
         manualMode(msg)
-        
-                
+
+def notificationTopicBuilder(acquario, tipo, valore):
+    topic = f"acquari/{acquario}/notifiche/{tipo}"
+    payload = str(valore)
+    return topic, payload
+
+def PublishNotificationTopic(acquario, tipo, valore):
+    topic, payload = notificationTopicBuilder(acquario, tipo, valore)
+    mqttClient.publish(topic, payload)
 
 def computePhMean():
     phValues = influxClient.query(
@@ -239,11 +260,9 @@ def computePhMean():
 
         if not (phMin<=p["ph_medio"]<=phMax) and p["Acquario"] and nomeAcq in acquariAuto:
             mqttClient.publish("stato/"+str(p["Acquario"]),"CAMBIO_ACQUA")
-            mqttClient.publish("acquari/"+p["Acquario"]+"/notifiche/cambioAcqua","false")
             mqttClient.publish("acquari/"+str(p["Acquario"])+"/attuatori/ps", "HIGH")
-           
-        elif  not (phMin<=p["ph_medio"]<=phMax) and p["Acquario"] and nomeAcq in acquariAuto:
-            mqttClient.publish("acquari/"+p["Acquario"]+"/notifiche/cambioAcqua","false")
+            PublishNotificationTopic(str(p["Acquario"]),"cambioAcqua","false")
+        
 
 
 def trigger(target: time):
@@ -296,13 +315,11 @@ def setLights():
         except Exception as e:
             print("setLights:", e)
         tm.sleep(30)
-
-
         
 mqttClient = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 mqttClient.on_connect = on_connect
 mqttClient.on_message = on_message
-
+mqttClient.will_set("online/mqttPyLogic","offline")
 mqttClient.connect(IP,1883,60)
 
 threading.Thread(target=trigger, args=(time(22,30),),daemon=True).start()
